@@ -1,9 +1,37 @@
+
+# ==========================================
+# LottoLab CR - Git Ignore
+# ==========================================
+
+# 1. Entornos virtuales
 .venv/
-__pycache__/
-*.pyc
+
+# 2. Variables de entorno y credenciales
 .env
+.env.*
+!.env.example
+
+# 3. Python - Archivos temporales
+__pycache__/
+*.py[cod]
+
+# 4. Pruebas automatizadas
 .pytest_cache/
+.coverage
+htmlcov/
+
+# 5. Streamlit - Configuración privada
+.streamlit/secrets.toml
+
+# 6. Datos generados o descargados
 data/raw/
 data/processed/
-.env.*
-.streamlit/secrets.toml
+
+# 7. Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# 8. Archivos temporales de editores
+*.swp
+*.swo
+*~

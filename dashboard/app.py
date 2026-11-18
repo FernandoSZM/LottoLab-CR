@@ -1,16 +1,13 @@
 
-from pathlib import Path
-import os
-
-import pandas as pd
 import plotly.express as px
-import psycopg
 import streamlit as st
-from dotenv import load_dotenv
+
+from components.charts import grafico_frecuencias
+from services.database import cargar_sorteos
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+
+
 
 st.set_page_config(
     page_title="LottoLab CR",
@@ -19,41 +16,6 @@ st.set_page_config(
 )
 
 
-@st.cache_data(ttl=300)
-def cargar_sorteos():
-    conexion = {
-        "host": os.getenv("DB_HOST"),
-        "port": os.getenv("DB_PORT"),
-        "dbname": os.getenv("DB_NAME"),
-        "user": os.getenv("DB_USER"),
-        "password": os.getenv("DB_PASSWORD"),
-    }
-
-    with psycopg.connect(**conexion) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT
-                    draw_id,
-                    draw_date,
-                    draw_time,
-                    winning_number
-                FROM draws
-                ORDER BY draw_date, draw_time, draw_id
-            """)
-
-            registros = cursor.fetchall()
-            columnas = [
-                "sorteo",
-                "fecha",
-                "hora",
-                "numero",
-            ]
-
-    df = pd.DataFrame(registros, columns=columnas)
-    df["fecha"] = pd.to_datetime(df["fecha"])
-    df["anio"] = df["fecha"].dt.year
-
-    return df
 
 
 st.title("🎯 LottoLab CR")
@@ -75,17 +37,25 @@ if df.empty:
 
 st.sidebar.header("Filtros")
 
-anios = sorted(df["anio"].unique().tolist())
 
-anios_seleccionados = st.sidebar.multiselect(
-    "Seleccionar años",
-    options=anios,
-    default=anios,
+anio_minimo = int(df["anio"].min())
+anio_maximo = int(df["anio"].max())
+
+rango_anios = st.sidebar.slider(
+    "Período de análisis",
+    min_value=anio_minimo,
+    max_value=anio_maximo,
+    value=(anio_minimo, anio_maximo),
+    step=1,
 )
 
 df_filtrado = df[
-    df["anio"].isin(anios_seleccionados)
+    df["anio"].between(
+        rango_anios[0],
+        rango_anios[1],
+    )
 ].copy()
+
 
 if df_filtrado.empty:
     st.info("Selecciona al menos un año.")
@@ -117,19 +87,25 @@ frecuencias = (
     .reset_index(name="Apariciones")
 )
 
-fig = px.bar(
-    frecuencias,
-    x="Número",
-    y="Apariciones",
-    title="Distribución de los 100 números",
+
+vista_frecuencias = st.segmented_control(
+    "Visualización",
+    options=[
+        "Todos",
+        "10 más frecuentes",
+        "10 menos frecuentes",
+    ],
+    default="Todos",
 )
 
-fig.update_layout(
-    xaxis=dict(type="category"),
-    height=450,
+fig = grafico_frecuencias(
+    frecuencias=frecuencias,
+    total_sorteos=total,
+    vista=vista_frecuencias,
 )
 
 st.plotly_chart(fig, width="stretch")
+
 
 col_izq, col_der = st.columns(2)
 
