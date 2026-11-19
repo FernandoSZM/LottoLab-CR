@@ -34,9 +34,14 @@ def grafico_frecuencias(frecuencias, total_sorteos, vista):
     )
 
     fig.update_layout(
+        template="plotly_white",
         height=480,
         xaxis=dict(type="category"),
         margin=dict(l=20, r=20, t=60, b=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#172B3A",
     )
+    fig.update_traces(marker_color="#0F766E")
 
     return fig

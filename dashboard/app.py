@@ -1,176 +1,383 @@
-
-import streamlit as st
+import html
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
-from services.database import cargar_ultimo_sorteo
+import pandas as pd
+import streamlit as st
 
-from services.database import cargar_sorteos
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+DASHBOARD_DIR = Path(__file__).resolve().parent
+ROOT_DIR = DASHBOARD_DIR.parent
+
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.statistics.ranking import calcular_ranking
-
+from services.database import cargar_sorteos
+from src.prediction.predictor import (
+    MODELOS_DISPONIBLES,
+    generar_prediccion,
+)
 
 
 st.set_page_config(
-    page_title="LottoLab CR | Inicio",
-    page_icon="🎯",
+    page_title="LottoLab CR",
+    page_icon="🎱",
     layout="wide",
 )
-
-st.title("🎯 LottoLab CR")
-st.caption(
-    "Explora los resultados de Nuevos Tiempos "
-    "de Costa Rica de forma sencilla."
-)
-
-st.divider()
-
-st.subheader("🎱 Último sorteo registrado")
-
-try:
-    sorteo = cargar_ultimo_sorteo()
-except Exception as error:
-    st.error("No se pudo consultar el último sorteo.")
-    st.exception(error)
-    st.stop()
-
-if sorteo is None:
-    st.warning("Todavía no hay sorteos registrados.")
-    st.stop()
-
-fecha = sorteo["fecha"].strftime("%d/%m/%Y")
-hora = sorteo["hora"].strftime("%I:%M %p")
 
 st.markdown(
     """
     <style>
-    .numero-ganador {
-        font-size: 6rem;
-        font-weight: 800;
-        text-align: center;
-        line-height: 1.2;
-        color: #38BDF8;
+    .ll-hero {
+        padding: 1.5rem 1.75rem;
+        margin: 0.25rem 0 1.5rem;
+        background: #ffffff;
+        border: 1px solid #dfe7ed;
+        border-left: 4px solid #0f766e;
+        border-radius: 1rem;
     }
-    .etiqueta-numero {
+
+    .ll-hero-label,
+    .ll-number-position,
+    .ll-number-caption {
+        color: #64748b;
+        font-size: 0.82rem;
+    }
+
+    .ll-hero-number {
+        color: #102a36;
+        font-size: clamp(2.5rem, 7vw, 4.5rem);
+        font-weight: 700;
+        line-height: 1.1;
+        letter-spacing: -0.04em;
+        margin: 0.2rem 0;
+    }
+
+    .ll-result-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+        gap: 0.75rem;
+        margin: 1rem 0;
+    }
+
+    .ll-number-card {
+        min-width: 0;
+        padding: 1rem 0.75rem;
         text-align: center;
-        color: #94A3B8;
-        font-size: 1rem;
+        background: #ffffff;
+        border: 1px solid #dfe7ed;
+        border-radius: 0.9rem;
+    }
+
+    .ll-number-value {
+        display: block;
+        margin: 0.35rem 0;
+        color: #0f766e;
+        font-size: clamp(1.9rem, 5vw, 2.5rem);
+        font-weight: 700;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 480px) {
+        .ll-hero {
+            padding: 1.1rem;
+        }
+
+        .ll-result-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    f'<div class="numero-ganador">{sorteo["numero"]}</div>',
-    unsafe_allow_html=True,
-)
 
-st.markdown(
-    '<div class="etiqueta-numero">Número ganador</div>',
-    unsafe_allow_html=True,
-)
-
-st.write("")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("📅 Fecha", fecha)
-col2.metric("🕒 Hora", hora)
-col3.metric("🎟️ Sorteo", f'#{sorteo["sorteo"]}')
-
-st.divider()
-
-
-st.subheader("🏆 Números más frecuentes")
-
-st.caption(
-    "Descubre cuáles números han aparecido más veces "
-    "en nuestros registros históricos."
-)
-
-cantidad = st.segmented_control(
-    "¿Cuántos números quieres ver?",
-    options=[3, 5, 10],
-    default=5,
-)
-
-try:
-    df_historico = cargar_sorteos()
-
-    ranking = calcular_ranking(
-        df_historico["numero"],
-        cantidad=cantidad,
+@st.cache_data(show_spinner=False, max_entries=16)
+def generar_prediccion_cacheada(
+    historial: pd.DataFrame,
+    fecha_objetivo: date,
+    hora_objetivo: str,
+    modelo_nombre: str,
+):
+    return generar_prediccion(
+        historial=historial,
+        fecha_objetivo=fecha_objetivo,
+        hora_objetivo=hora_objetivo,
+        modelo_nombre=modelo_nombre,
+        cantidad=10,
     )
 
-except Exception as error:
-    st.error("No se pudo calcular el ranking.")
-    st.exception(error)
-    st.stop()
 
-columnas = st.columns(cantidad if cantidad <= 5 else 5)
+def render_inicio():
+    st.title("LottoLab CR")
+    st.caption(
+        "Explora resultados de Nuevos Tiempos y genera "
+        "una estimación experimental a partir del historial disponible."
+    )
 
-for indice, fila in ranking.iterrows():
-    with columnas[indice % len(columnas)]:
-        with st.container(border=True):
-            st.caption(f"Posición #{indice + 1}")
+    try:
+        historial = cargar_sorteos()
+    except Exception as error:
+        st.error("No se pudo cargar el historial desde PostgreSQL.")
+        with st.expander("Detalles técnicos"):
+            st.exception(error)
+        st.stop()
+
+    if historial.empty:
+        st.warning("No hay sorteos disponibles para generar una estimación.")
+        st.stop()
+
+    historial = historial.sort_values(
+        ["fecha", "hora", "sorteo"]
+    ).reset_index(drop=True)
+
+    ultimo = historial.iloc[-1]
+    ultima_fecha = pd.Timestamp(ultimo["fecha"]).date()
+    ultima_hora = str(ultimo["hora"])[:5]
+    fecha_objetivo_inicial = ultima_fecha + timedelta(days=1)
+    horarios_observados = sorted(
+        {
+            str(horario)[:5]
+            for horario in historial.loc[
+                historial["fecha"].dt.date == ultima_fecha,
+                "hora",
+            ]
+        }
+    )
+
+    if not horarios_observados:
+        st.error(
+            "No se encontraron horarios en los registros "
+            "de la última fecha disponible."
+        )
+        st.stop()
+
+    esta_desactualizado = (
+        ultima_fecha < date.today() - timedelta(days=7)
+    )
+
+    if esta_desactualizado:
+        st.warning(
+            "Modo de demostración. "
+            f"El historial llega hasta {ultima_fecha:%d/%m/%Y}; "
+            "esta estimación no representa un pronóstico vigente."
+        )
+    else:
+        st.caption(
+            f"Historial disponible hasta {ultima_fecha:%d/%m/%Y}. "
+            "La estimación es experimental."
+        )
+
+    st.subheader("Generar una estimación")
+    st.write(
+        "Elige una fecha, un horario observado en el último día registrado "
+        "y el tamaño del ranking."
+    )
+
+    with st.form("formulario_predictor"):
+        col_fecha, col_horario, col_ranking = st.columns(3)
+
+        with col_fecha:
+            fecha_objetivo = st.date_input(
+                "Fecha objetivo",
+                value=fecha_objetivo_inicial,
+                min_value=fecha_objetivo_inicial,
+            )
+
+        with col_horario:
+            hora_objetivo = st.selectbox(
+                "Horario registrado",
+                options=horarios_observados,
+                help=(
+                    "Opciones registradas en la última fecha del historial; "
+                    "no son una confirmación de horarios oficiales vigentes."
+                ),
+            )
+
+        with col_ranking:
+            cantidad = st.selectbox(
+                "Mostrar números",
+                options=[3, 5, 10],
+                index=1,
+                format_func=lambda valor: f"Top {valor}",
+            )
+
+        with st.expander("Ajustes avanzados · modelo"):
+            modelo_nombre = st.selectbox(
+                "Modelo experimental",
+                options=MODELOS_DISPONIBLES,
+                index=MODELOS_DISPONIBLES.index(
+                    "Regresión logística"
+                ),
+                help=(
+                    "El modelo uniforme es una referencia: asigna "
+                    "la misma probabilidad a los 100 números."
+                ),
+            )
+
+        generar = st.form_submit_button(
+            "Generar estimación",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if generar:
+        st.session_state.pop("estimacion_lottolab", None)
+        try:
+            with st.spinner("Calculando la estimación…"):
+                resultado = generar_prediccion_cacheada(
+                    historial=historial,
+                    fecha_objetivo=fecha_objetivo,
+                    hora_objetivo=hora_objetivo,
+                    modelo_nombre=modelo_nombre,
+                )
+            resultado["ranking"] = (
+                resultado["ranking"]
+                .head(cantidad)
+                .reset_index(drop=True)
+            )
+            st.session_state["estimacion_lottolab"] = resultado
+        except Exception as error:
+            st.error("No fue posible generar la estimación.")
+            with st.expander("Detalles técnicos"):
+                st.exception(error)
+
+    resultado = st.session_state.get("estimacion_lottolab")
+
+    if resultado is not None:
+        st.divider()
+        st.subheader(
+            f"Estimación para {pd.Timestamp(resultado['fecha_objetivo']):%d/%m/%Y}"
+        )
+        st.caption(
+            f"{resultado['hora_objetivo']} · {resultado['modelo']} · "
+            f"Basado en {resultado['sorteos_entrenamiento']:,} sorteos"
+        )
+
+        if resultado["modelo"] == "Uniforme":
+            st.info(
+                "El modelo uniforme asigna 1 % a cada uno de los 100 números. "
+                "Todos están empatados, así que no hay favoritos ni un ranking "
+                "que sea significativo."
+            )
+        else:
+            st.write("Números mejor posicionados por el modelo")
+            tarjetas = []
+            for posicion, fila in resultado["ranking"].iterrows():
+                numero = html.escape(str(fila["Número"]))
+                probabilidad = float(
+                    fila["Probabilidad estimada (%)"]
+                )
+                tarjetas.append(
+                    "<article class='ll-number-card'>"
+                    f"<span class='ll-number-position'>#{posicion + 1}</span>"
+                    f"<strong class='ll-number-value'>{numero}</strong>"
+                    "<span class='ll-number-caption'>"
+                    f"Estimación del modelo: {probabilidad:.2f} %"
+                    "</span></article>"
+                )
 
             st.markdown(
-                f"### 🎱 {fila['Número']}"
+                "<div class='ll-result-grid'>"
+                + "".join(tarjetas)
+                + "</div>",
+                unsafe_allow_html=True,
             )
-
-            st.metric(
-                "Frecuencia histórica",
-                f"{fila['Frecuencia histórica (%)']:.2f} %",
-            )
-
             st.caption(
-                f"{fila['Apariciones']} apariciones"
+                "El orden y los porcentajes son resultados experimentales; "
+                "no demuestran una ventaja predictiva frente al azar."
             )
 
-st.info(
-    "Estos porcentajes describen la frecuencia histórica "
-    "de cada número. No representan una probabilidad "
-    "predictiva validada para el próximo sorteo."
-)
+    st.divider()
+    st.subheader("Último resultado disponible")
 
-st.divider()
-
-
-st.subheader("📊 Explora LottoLab CR")
-
-st.write(
-    "Consulta las estadísticas históricas, descubre "
-    "los números más frecuentes y revisa la calidad "
-    "de nuestros datos."
-)
-
-col_izq, col_der = st.columns(2)
-
-with col_izq:
-    st.page_link(
-        "pages/3_Laboratorio.py",
-        label="📈 Explorar estadísticas",
-        use_container_width=True,
+    numero_ultimo = html.escape(str(ultimo["numero"]).zfill(2))
+    st.markdown(
+        "<section class='ll-hero'>"
+        "<span class='ll-hero-label'>Número registrado</span>"
+        f"<p class='ll-hero-number'>{numero_ultimo}</p>"
+        f"<span class='ll-hero-label'>"
+        f"{ultima_fecha:%d/%m/%Y} · {html.escape(ultima_hora)}"
+        f" · Sorteo #{html.escape(str(ultimo['sorteo']))}"
+        "</span></section>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Es el último registro disponible en la base de datos; "
+        "no necesariamente corresponde al sorteo más reciente celebrado."
     )
 
-with col_der:
-    st.page_link(
-        "pages/1_Analisis_Estadistico.py",
-        label="🔬 Análisis estadístico",
-        use_container_width=True,
-    )
+    st.divider()
+    st.subheader("Explora LottoLab")
+    col_stats, col_lab, col_quality = st.columns(3)
 
-st.divider()
+    with col_stats:
+        st.page_link(
+            estadisticas_page,
+            label="Estadísticas históricas",
+            icon=":material/monitoring:",
+            use_container_width=True,
+        )
 
-st.caption(
-    "Fuente: registros históricos de Nuevos Tiempos. "
-    "Los resultados mostrados corresponden a los datos "
-    "disponibles en nuestra base de datos y no necesariamente "
-    "al último sorteo celebrado por la JPS."
+    with col_lab:
+        st.page_link(
+            laboratorio_page,
+            label="Laboratorio de modelos",
+            icon=":material/science:",
+            use_container_width=True,
+        )
+
+    with col_quality:
+        st.page_link(
+            calidad_page,
+            label="Calidad de datos",
+            icon=":material/fact_check:",
+            use_container_width=True,
+        )
+
+
+inicio_page = st.Page(
+    render_inicio,
+    title="Inicio",
+    icon=":material/home:",
+    url_path="inicio",
+    default=True,
 )
+
+estadisticas_page = st.Page(
+    "pages/1_Analisis_Estadistico.py",
+    title="Estadísticas",
+    icon=":material/monitoring:",
+    url_path="estadisticas",
+)
+
+laboratorio_page = st.Page(
+    "pages/3_Laboratorio.py",
+    title="Laboratorio",
+    icon=":material/science:",
+    url_path="laboratorio",
+)
+
+calidad_page = st.Page(
+    "pages/2_Calidad_de_Datos.py",
+    title="Calidad de datos",
+    icon=":material/fact_check:",
+    url_path="calidad",
+)
+
+pagina_actual = st.navigation(
+    [
+        inicio_page,
+        estadisticas_page,
+        laboratorio_page,
+        calidad_page,
+    ],
+    position="top",
+)
+pagina_actual.run()

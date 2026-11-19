@@ -1,5 +1,4 @@
 
-import pandas as pd
 import streamlit as st
 
 from services.database import cargar_sorteos
@@ -7,11 +6,10 @@ from services.database import cargar_sorteos
 
 st.set_page_config(
     page_title="Calidad de datos | LottoLab CR",
-    page_icon="🔍",
     layout="wide",
 )
 
-st.title("🔍 Calidad de datos")
+st.title("Calidad de datos")
 st.caption(
     "Auditoría de integridad y consistencia "
     "de los sorteos históricos"
@@ -21,7 +19,8 @@ try:
     df = cargar_sorteos()
 except Exception as error:
     st.error("No se pudieron cargar los datos.")
-    st.exception(error)
+    with st.expander("Detalles técnicos"):
+        st.exception(error)
     st.stop()
 
 if df.empty:
