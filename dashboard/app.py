@@ -1,154 +1,176 @@
 
-import plotly.express as px
 import streamlit as st
+import sys
+from pathlib import Path
 
-from components.charts import grafico_frecuencias
+from services.database import cargar_ultimo_sorteo
+
 from services.database import cargar_sorteos
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
 
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.statistics.ranking import calcular_ranking
 
 
 
 st.set_page_config(
-    page_title="LottoLab CR",
+    page_title="LottoLab CR | Inicio",
     page_icon="🎯",
     layout="wide",
 )
 
-
-
-
 st.title("🎯 LottoLab CR")
 st.caption(
-    "Laboratorio de análisis estadístico "
-    "de Nuevos Tiempos — Costa Rica"
-)
-
-try:
-    df = cargar_sorteos()
-except Exception as error:
-    st.error("No se pudo conectar con PostgreSQL.")
-    st.exception(error)
-    st.stop()
-
-if df.empty:
-    st.warning("No hay sorteos disponibles.")
-    st.stop()
-
-st.sidebar.header("Filtros")
-
-
-anio_minimo = int(df["anio"].min())
-anio_maximo = int(df["anio"].max())
-
-rango_anios = st.sidebar.slider(
-    "Período de análisis",
-    min_value=anio_minimo,
-    max_value=anio_maximo,
-    value=(anio_minimo, anio_maximo),
-    step=1,
-)
-
-df_filtrado = df[
-    df["anio"].between(
-        rango_anios[0],
-        rango_anios[1],
-    )
-].copy()
-
-
-if df_filtrado.empty:
-    st.info("Selecciona al menos un año.")
-    st.stop()
-
-total = len(df_filtrado)
-numeros_unicos = df_filtrado["numero"].nunique()
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Sorteos analizados", f"{total:,}")
-col2.metric("Números distintos", numeros_unicos)
-col3.metric(
-    "Período",
-    f"{df_filtrado['anio'].min()}–{df_filtrado['anio'].max()}"
+    "Explora los resultados de Nuevos Tiempos "
+    "de Costa Rica de forma sencilla."
 )
 
 st.divider()
 
-st.subheader("Frecuencia de números ganadores")
+st.subheader("🎱 Último sorteo registrado")
 
-numeros = [f"{n:02d}" for n in range(100)]
+try:
+    sorteo = cargar_ultimo_sorteo()
+except Exception as error:
+    st.error("No se pudo consultar el último sorteo.")
+    st.exception(error)
+    st.stop()
 
-frecuencias = (
-    df_filtrado["numero"]
-    .value_counts()
-    .reindex(numeros, fill_value=0)
-    .rename_axis("Número")
-    .reset_index(name="Apariciones")
+if sorteo is None:
+    st.warning("Todavía no hay sorteos registrados.")
+    st.stop()
+
+fecha = sorteo["fecha"].strftime("%d/%m/%Y")
+hora = sorteo["hora"].strftime("%I:%M %p")
+
+st.markdown(
+    """
+    <style>
+    .numero-ganador {
+        font-size: 6rem;
+        font-weight: 800;
+        text-align: center;
+        line-height: 1.2;
+        color: #38BDF8;
+    }
+    .etiqueta-numero {
+        text-align: center;
+        color: #94A3B8;
+        font-size: 1rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-
-vista_frecuencias = st.segmented_control(
-    "Visualización",
-    options=[
-        "Todos",
-        "10 más frecuentes",
-        "10 menos frecuentes",
-    ],
-    default="Todos",
+st.markdown(
+    f'<div class="numero-ganador">{sorteo["numero"]}</div>',
+    unsafe_allow_html=True,
 )
 
-fig = grafico_frecuencias(
-    frecuencias=frecuencias,
-    total_sorteos=total,
-    vista=vista_frecuencias,
+st.markdown(
+    '<div class="etiqueta-numero">Número ganador</div>',
+    unsafe_allow_html=True,
 )
 
-st.plotly_chart(fig, width="stretch")
+st.write("")
 
+col1, col2, col3 = st.columns(3)
+
+col1.metric("📅 Fecha", fecha)
+col2.metric("🕒 Hora", hora)
+col3.metric("🎟️ Sorteo", f'#{sorteo["sorteo"]}')
+
+st.divider()
+
+
+st.subheader("🏆 Números más frecuentes")
+
+st.caption(
+    "Descubre cuáles números han aparecido más veces "
+    "en nuestros registros históricos."
+)
+
+cantidad = st.segmented_control(
+    "¿Cuántos números quieres ver?",
+    options=[3, 5, 10],
+    default=5,
+)
+
+try:
+    df_historico = cargar_sorteos()
+
+    ranking = calcular_ranking(
+        df_historico["numero"],
+        cantidad=cantidad,
+    )
+
+except Exception as error:
+    st.error("No se pudo calcular el ranking.")
+    st.exception(error)
+    st.stop()
+
+columnas = st.columns(cantidad if cantidad <= 5 else 5)
+
+for indice, fila in ranking.iterrows():
+    with columnas[indice % len(columnas)]:
+        with st.container(border=True):
+            st.caption(f"Posición #{indice + 1}")
+
+            st.markdown(
+                f"### 🎱 {fila['Número']}"
+            )
+
+            st.metric(
+                "Frecuencia histórica",
+                f"{fila['Frecuencia histórica (%)']:.2f} %",
+            )
+
+            st.caption(
+                f"{fila['Apariciones']} apariciones"
+            )
+
+st.info(
+    "Estos porcentajes describen la frecuencia histórica "
+    "de cada número. No representan una probabilidad "
+    "predictiva validada para el próximo sorteo."
+)
+
+st.divider()
+
+
+st.subheader("📊 Explora LottoLab CR")
+
+st.write(
+    "Consulta las estadísticas históricas, descubre "
+    "los números más frecuentes y revisa la calidad "
+    "de nuestros datos."
+)
 
 col_izq, col_der = st.columns(2)
 
 with col_izq:
-    st.subheader("10 más frecuentes")
-    st.dataframe(
-        frecuencias.nlargest(10, "Apariciones"),
-        hide_index=True,
+    st.page_link(
+        "pages/3_Laboratorio.py",
+        label="📈 Explorar estadísticas",
+        use_container_width=True,
     )
 
 with col_der:
-    st.subheader("10 menos frecuentes")
-    st.dataframe(
-        frecuencias.nsmallest(10, "Apariciones"),
-        hide_index=True,
+    st.page_link(
+        "pages/1_Analisis_Estadistico.py",
+        label="🔬 Análisis estadístico",
+        use_container_width=True,
     )
 
 st.divider()
 
-st.subheader("Sorteos por año")
-
-sorteos_anuales = (
-    df_filtrado.groupby("anio")
-    .size()
-    .reset_index(name="Sorteos")
-)
-
-fig_anual = px.bar(
-    sorteos_anuales,
-    x="anio",
-    y="Sorteos",
-    labels={"anio": "Año"},
-)
-
-fig_anual.update_xaxes(type="category")
-st.plotly_chart(fig_anual, width="stretch")
-
-st.subheader("Explorador de registros")
-
-st.dataframe(
-    df_filtrado.sort_values(
-        ["fecha", "hora", "sorteo"],
-        ascending=False,
-    ),
-    hide_index=True,
+st.caption(
+    "Fuente: registros históricos de Nuevos Tiempos. "
+    "Los resultados mostrados corresponden a los datos "
+    "disponibles en nuestra base de datos y no necesariamente "
+    "al último sorteo celebrado por la JPS."
 )
